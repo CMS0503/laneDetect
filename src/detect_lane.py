@@ -7,33 +7,15 @@ class Lane():
     def __init__(self):
         # was the line detected in the last frame or not
         self.detected = False
-        #x values for detected line pixels
-        self.cur_fitx = None
-        #y values for detected line pixels
-        self.cur_fity = None
-        # x values of the last N fits of the line
-        self.prev_fitx = []
-        #polynomial coefficients for the most recent fit
-        self.current_poly = [np.array([False])]
-        #best polynomial coefficients for the last iteration
-        self.prev_poly = [np.array([False])]
-
-        def average_pre_lanes(self):
-            tmp = copy(self.prev_fitx)
-            tmp.append(self.cur_fitx)
-            self.mean_fitx = np.mean(tmp, axis=0)
-
-        def append_fitx(self):
-            if len(self.prev_fitx) == N:
-                self.prev_fitx.pop(0)
-            self.prev_fitx.append(self.mean_fitx)
-
-        def process(self, ploty):
-            self.cur_fity = ploty
-            self.average_pre_lanes()
-            self.append_fitx()
-            self.prev_poly = self.current_poly
-
+        self.current_fit = None
+        self.all_x = None
+        self.all_y = None
+        self.start_x = None
+        self.start_y = None
+        self.end_x = None
+        self.end_y = None
+        self.prev_x = []
+        self.radius_of_curvature = None
 
 left_lane = Lane()
 right_lane = Lane()
@@ -93,9 +75,52 @@ def dir_threshold(img, sobel_kernel=3, thresh=(0, np.pi/2)):
 
     return binary_output
 
+
+def smoothing(lines, pre_lines=3):
+    # collect lines & print average line
+    lines = np.squeeze(lines)
+    avg_line = np.zeros((720))
+
+    for ii, line in enumerate(reversed(lines)):
+        if ii == pre_lines:
+            break
+        avg_line += line
+    avg_line = avg_line / pre_lines
+
+    return avg_line
+
+
+def rad_of_curvature():
+    plot_y = left_lane.all_y
+    left_x, right_x = left_lane.all_x, right_lane.all_x
+
+    left_x = left_x[::-1]  # Reverse to match top-to-bottom in y
+    right_x = right_x[::-1]  # Reverse to match top-to-bottom in y
+
+    # Define conversions in x and y from pixels space to meters
+    width_lanes = abs(right_lane.start_x - left_lane.start_x)
+    ym_per_pix = 30 / 360  # meters per pixel in y dimension
+    xm_per_pix = 3.7*(360/640) / width_lanes  # meters per pixel in x dimension
+
+    # Define y-value where we want radius of curvature
+    # the maximum y-value, corresponding to the bottom of the image
+    y_eval = np.max(plot_y)
+
+    # Fit new polynomials to x,y in world space
+    left_fit_cr = np.polyfit(plot_y * ym_per_pix, left_x * xm_per_pix, 2)
+    right_fit_cr = np.polyfit(plot_y * ym_per_pix, right_x * xm_per_pix, 2)
+    # Calculate the new radii of curvature
+    left_curverad = ((1 + (2 * left_fit_cr[0] * y_eval * ym_per_pix + left_fit_cr[1]) ** 2) ** 1.5) / np.absolute(
+        2 * left_fit_cr[0])
+    right_curverad = ((1 + (2 * right_fit_cr[0] * y_eval * ym_per_pix + right_fit_cr[1]) ** 2) ** 1.5) / np.absolute(
+        2 * right_fit_cr[0])
+    # radius of curvature result
+    left_lane.radius_of_curvature = left_curverad
+    right_lane.radius_of_curvature = right_curverad
+
+
 def find_lines(img):
     histogram = np.sum(img[int(img.shape[0] / 2):, :], axis=0)
-
     output = np.dstack((img, img, img)) * 255
 
     mid = int(histogram.shape[0]/2)
@@ -111,8 +136,8 @@ def find_lines(img):
     nonzero_x = nonzero[1]
     nonzero_y = nonzero[0]
 
-    left_lane_pixels = []
-    right_lane_pixels = []
+    left_lane_pixels_idxs = []
+    right_lane_pixels_idxs = []
 
     for window in range(num_windows):
         window_min_y = img.shape[0] - (window + 1) * window_h
@@ -123,29 +148,86 @@ def find_lines(img):
         window_right_x_max = current_right_x + window_margin
 
         cv2.rectangle(output, (window_left_x_min, window_min_y), (window_left_x_max, window_max_y), (0, 255, 0), 2)
-        cv2.rectangle(output, (window_right_x_min, window_min_y), (window_right_x_max, window_max_y), (255, 0, 0), 2)
+        cv2.rectangle(output, (window_right_x_min, window_min_y), (window_right_x_max, window_max_y), (0, 255, 0), 2)
 
-        left_window_inds = ((nonzero_y >= window_min_y) & (nonzero_y <= window_max_y) & (nonzero_x >= window_left_x_min)
+        left_window_idxs = ((nonzero_y >= window_min_y) & (nonzero_y <= window_max_y) & (nonzero_x >= window_left_x_min)
                             & (nonzero_x <= window_left_x_max)).nonzero()[0]
 
-        right_window_inds = ((nonzero_y >= window_min_y) & (nonzero_y <= window_max_y) & (nonzero_x >= window_right_x_min)
+        right_window_idxs = ((nonzero_y >= window_min_y) & (nonzero_y <= window_max_y) & (nonzero_x >= window_right_x_min)
                             & (nonzero_x <= window_right_x_max)).nonzero()[0]
+        left_lane_pixels_idxs.append(left_window_idxs)
+        right_lane_pixels_idxs.append(right_window_idxs)
 
-        left_lane_pixels.append(left_window_inds)
-        right_lane_pixels.append(right_window_inds)
+        if len(left_window_idxs) > 100:
+            current_left_x = np.int(np.mean(nonzero_x[left_window_idxs]))
+        if len(right_window_idxs) > 100:
+            current_right_x = np.int(np.mean(nonzero_x[right_window_idxs]))
 
-        if len(left_window_inds) > 100:
-            current_left_x = np.int(np.mean(nonzero_x[left_window_inds]))
-        if len(right_window_inds) > 100:
-            current_right_x = np.int(np.mean(nonzero_x[right_window_inds]))
+        # print('left_window_idxs :', left_window_inds.shape)
 
-        cy = (window_min_y + window_max_y) // 2
-        cv2.circle(output, (current_left_x, cy), 3, (0, 0, 255), -1)
-        cv2.circle(output, (current_right_x, cy), 3, (0, 0, 255), -1)
+
+        # cy = (window_min_y + window_max_y) // 2
+        # cv2.circle(output, (current_left_x, cy), 3, (0, 0, 255), -1)
+        # cv2.circle(output, (current_right_x, cy), 3, (0, 0, 255), -1)
+
+    left_lane_pixels_idxs = np.concatenate(left_lane_pixels_idxs)
+    right_lane_pixels_idxs = np.concatenate(right_lane_pixels_idxs)
+
+    left_x, left_y = nonzero_x[left_lane_pixels_idxs], nonzero_y[left_lane_pixels_idxs]
+    right_x, right_y = nonzero_x[right_lane_pixels_idxs], nonzero_y[right_lane_pixels_idxs]
+
+    output[left_y, left_x] = [255, 0, 0]
+    output[right_y, right_x] = [0, 0, 255]
+    left_fit = np.polyfit(left_y, left_x, 2)
+    right_fit = np.polyfit(right_y, right_x, 2)
+
+    left_lane.current_fit = left_fit
+    right_lane.current_fit = right_fit
+
+    plot_y = np.linspace(0, img.shape[0] - 1, img.shape[0])
+
+    left_plot_x = left_fit[0] * plot_y ** 2 + left_fit[1] * plot_y + left_fit[2]
+    right_plot_x = right_fit[0] * plot_y ** 2 + right_fit[1] * plot_y + right_fit[2]
+
+
+    left_lane.prev_x.append(left_plot_x)
+    right_lane.prev_x.append(right_plot_x)
+
+    if len(left_lane.prev_x) > 10:
+        left_avg_line = smoothing(left_lane.prev_x, 10)
+        left_avg_fit = np.polyfit(plot_y, left_avg_line, 2)
+        left_fit_plot_x = left_avg_fit[0] * plot_y ** 2 + left_avg_fit[1] * plot_y + left_avg_fit[2]
+        left_lane.current_fit = left_avg_fit
+        left_lane.all_x, left_lane.all_y = left_fit_plot_x, plot_y
+    else:
+        left_lane.current_fit = left_fit
+        left_lane.all_x, left_lane.all_y = left_plot_x, plot_y
+
+    if len(right_lane.prev_x) > 10:
+        right_avg_line = smoothing(right_lane.prev_x, 10)
+        right_avg_fit = np.polyfit(plot_y, right_avg_line, 2)
+        right_fit_plot_x = right_avg_fit[0] * plot_y ** 2 + right_avg_fit[1] * plot_y + right_avg_fit[2]
+        right_lane.current_fit = right_avg_fit
+        right_lane.all_x, right_lane.all_y = right_fit_plot_x, plot_y
+    else:
+        right_lane.current_fit = right_fit
+        right_lane.all_x, right_lane.all_y = right_plot_x, plot_y
+
+    left_lane.start_x, right_lane.start_x = left_lane.all_x[len(left_lane.all_x) - 1], right_lane.all_x[
+        len(right_lane.all_x) - 1]
+    left_lane.end_x, right_lane.end_x = left_lane.all_x[0], right_lane.all_x[0]
+
+    left_lane.detected, right_lane.detected = True, True
+    # print radius of curvature
+    rad_of_curvature()
+
     return output
+
+
 def find_edges(img, s_thresh=s_thresh):
     img = np.copy(img)
-    hls = cv2.cvtColor(img, cv2.COLOR_BGR2HLS).astype(np.float)
+
+    hls = cv2.cvtColor(img, cv2.COLOR_BGR2HLS).astype(np.float64)
     s_channel = hls[:, :, 2]
     s_binary = get_binary(s_channel, s_thresh)
 
@@ -154,25 +236,48 @@ def find_edges(img, s_thresh=s_thresh):
     dir_binary = dir_threshold(img, sobel_kernel=3, thresh=dir_thresh)
 
     # output mask
-    combined_binary = np.zeros_like(s_channel)
-    combined_binary[(((sxbinary == 1) & (dir_binary == 1)) | ((s_binary == 1) & (dir_binary == 1)))] = 1
-
+    combined_binary = np.zeros_like(s_channel).astype(np.uint8)
+    combined_binary[(((sxbinary == 1) & (dir_binary == 1)) | ((s_binary == 1) & (dir_binary == 1)))] = 255
     # add more weights for the s channel
-    c_bi = np.zeros_like(s_channel)
-    c_bi[((sxbinary == 1) & (s_binary == 1))] = 2
 
-    ave_binary = (combined_binary + c_bi)
-
-    return ave_binary
+    return combined_binary
 
 def warper(img):
     warped = cv2.warpPerspective(img, M, (img.shape[1], img.shape[0]), flags=cv2.INTER_NEAREST)
-
     return warped
+
+
+def draw_lane(img, lane_color=(255, 0, 255), road_color=(0, 255, 0)):
+    window_img = np.zeros_like(img)
+
+    left_plot_x, right_plot_x = left_lane.all_x, right_lane.all_x
+    plot_y = left_lane.all_y
+
+    left_pts_l = np.array([np.transpose(np.vstack([left_plot_x - window_margin/5, plot_y]))])
+    left_pts_r = np.array([np.flipud(np.transpose(np.vstack([left_plot_x + window_margin/5, plot_y])))])
+    left_pts = np.hstack((left_pts_l, left_pts_r))
+    right_pts_l = np.array([np.transpose(np.vstack([right_plot_x - window_margin/5, plot_y]))])
+    right_pts_r = np.array([np.flipud(np.transpose(np.vstack([right_plot_x + window_margin/5, plot_y])))])
+    right_pts = np.hstack((right_pts_l, right_pts_r))
+
+    cv2.fillPoly(window_img, np.int_([left_pts]), lane_color)
+    cv2.fillPoly(window_img, np.int_([right_pts]), lane_color)
+
+    pts_left = np.array([np.transpose(np.vstack([left_plot_x+window_margin/5, plot_y]))])
+    pts_right = np.array([np.flipud(np.transpose(np.vstack([right_plot_x-window_margin/5, plot_y])))])
+    pts = np.hstack((pts_left, pts_right))
+
+    cv2.fillPoly(window_img, np.int_([pts]), road_color)
+    print(type(window_img[0][0][0]))
+
+    result = cv2.addWeighted(img, 1, window_img, 0.7, 0)
+    return result, window_img
+
 
 def process_img(img, visualization=False):
     img_undist = cv2.undistort(img, mtx, dist, None, mtx)
-    img_undist = cv2.resize(img_undist, (0, 0), fx=1/2, fy=1/2)
+
+    img_undist = cv2.resize(img_undist, (0, 0), fx=1/2, fy=1/2, interpolation=cv2.INTER_AREA)
     img_binary = find_edges(img_undist)
 
     cv2.circle(img, (x[0], y[0]), 10, (255, 0, 0), -1)
@@ -184,15 +289,30 @@ def process_img(img, visualization=False):
 
     output = find_lines(warped)
 
-    cv2.imshow('output', output)
+    # cv2.imshow('output', output)
 
-
-
+    return output, img_undist
 
 if __name__ == '__main__':
     img = cv2.imread('../test_images/test1.jpg')
-    img = process_img(img)
-    # cv2.imshow(img)
+    img, img_undist = process_img(img)
+
+    result_comb, result_color = draw_lane(img)
+    rows, cols = result_comb.shape[:2]
+
+    result_color = cv2.warpPerspective(result_color, M_inv, (result_comb.shape[1], result_comb.shape[0]), flags=cv2.INTER_NEAREST)
+    comb_result = np.zeros_like(img_undist)
+
+    comb_result[220:rows - 12, 0:cols] = result_color[220:rows - 12, 0:cols]
+    # print(comb_result.shape, result_color.shape)
+    # comb_result = np.asarray(comb_result, np.uint8)
+
+
+    result = cv2.addWeighted(img_undist, 0.7, result_color, 0.3, 0)
+    # print(type(img_undist[0][0][0]), type(result_color[0][0][0]))
+
+    cv2.imshow('result', result)
+
     cv2.waitKey(0)
 
 
