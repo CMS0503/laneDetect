@@ -16,6 +16,7 @@ class Lane():
         self.end_y = None
         self.prev_x = []
         self.radius_of_curvature = None
+        self.curve_info = None
 
 left_lane = Lane()
 right_lane = Lane()
@@ -77,9 +78,8 @@ def dir_threshold(img, sobel_kernel=3, thresh=(0, np.pi/2)):
 
 
 def smoothing(lines, pre_lines=3):
-    # collect lines & print average line
     lines = np.squeeze(lines)
-    avg_line = np.zeros((720))
+    avg_line = np.zeros((360))
 
     for ii, line in enumerate(reversed(lines)):
         if ii == pre_lines:
@@ -94,27 +94,21 @@ def rad_of_curvature():
     plot_y = left_lane.all_y
     left_x, right_x = left_lane.all_x, right_lane.all_x
 
-    left_x = left_x[::-1]  # Reverse to match top-to-bottom in y
-    right_x = right_x[::-1]  # Reverse to match top-to-bottom in y
+    left_x = left_x[::-1]
+    right_x = right_x[::-1]
 
-    # Define conversions in x and y from pixels space to meters
     width_lanes = abs(right_lane.start_x - left_lane.start_x)
-    ym_per_pix = 30 / 360  # meters per pixel in y dimension
-    xm_per_pix = 3.7*(360/640) / width_lanes  # meters per pixel in x dimension
+    ym_per_pix = 30 / 360
+    xm_per_pix = 3.7*(360/640) / width_lanes
 
-    # Define y-value where we want radius of curvature
-    # the maximum y-value, corresponding to the bottom of the image
     y_eval = np.max(plot_y)
 
-    # Fit new polynomials to x,y in world space
     left_fit_cr = np.polyfit(plot_y * ym_per_pix, left_x * xm_per_pix, 2)
     right_fit_cr = np.polyfit(plot_y * ym_per_pix, right_x * xm_per_pix, 2)
-    # Calculate the new radii of curvature
     left_curverad = ((1 + (2 * left_fit_cr[0] * y_eval * ym_per_pix + left_fit_cr[1]) ** 2) ** 1.5) / np.absolute(
         2 * left_fit_cr[0])
     right_curverad = ((1 + (2 * right_fit_cr[0] * y_eval * ym_per_pix + right_fit_cr[1]) ** 2) ** 1.5) / np.absolute(
         2 * right_fit_cr[0])
-    # radius of curvature result
     left_lane.radius_of_curvature = left_curverad
     right_lane.radius_of_curvature = right_curverad
 
@@ -124,8 +118,10 @@ def find_lines(img):
     output = np.dstack((img, img, img)) * 255
 
     mid = int(histogram.shape[0]/2)
+
     start_left_x = np.argmax(histogram[:mid])
     start_right_x = np.argmax(histogram[mid:]) + mid
+
     num_windows = 9
     window_h = img.shape[0] // 9
 
@@ -147,14 +143,16 @@ def find_lines(img):
         window_right_x_min = current_right_x - window_margin
         window_right_x_max = current_right_x + window_margin
 
+        # lane window
         cv2.rectangle(output, (window_left_x_min, window_min_y), (window_left_x_max, window_max_y), (0, 255, 0), 2)
         cv2.rectangle(output, (window_right_x_min, window_min_y), (window_right_x_max, window_max_y), (0, 255, 0), 2)
 
+        # lane pixels
         left_window_idxs = ((nonzero_y >= window_min_y) & (nonzero_y <= window_max_y) & (nonzero_x >= window_left_x_min)
                             & (nonzero_x <= window_left_x_max)).nonzero()[0]
-
         right_window_idxs = ((nonzero_y >= window_min_y) & (nonzero_y <= window_max_y) & (nonzero_x >= window_right_x_min)
                             & (nonzero_x <= window_right_x_max)).nonzero()[0]
+
         left_lane_pixels_idxs.append(left_window_idxs)
         right_lane_pixels_idxs.append(right_window_idxs)
 
@@ -162,9 +160,6 @@ def find_lines(img):
             current_left_x = np.int(np.mean(nonzero_x[left_window_idxs]))
         if len(right_window_idxs) > 100:
             current_right_x = np.int(np.mean(nonzero_x[right_window_idxs]))
-
-        # print('left_window_idxs :', left_window_inds.shape)
-
 
         # cy = (window_min_y + window_max_y) // 2
         # cv2.circle(output, (current_left_x, cy), 3, (0, 0, 255), -1)
@@ -188,7 +183,6 @@ def find_lines(img):
 
     left_plot_x = left_fit[0] * plot_y ** 2 + left_fit[1] * plot_y + left_fit[2]
     right_plot_x = right_fit[0] * plot_y ** 2 + right_fit[1] * plot_y + right_fit[2]
-
 
     left_lane.prev_x.append(left_plot_x)
     right_lane.prev_x.append(right_plot_x)
@@ -218,7 +212,6 @@ def find_lines(img):
     left_lane.end_x, right_lane.end_x = left_lane.all_x[0], right_lane.all_x[0]
 
     left_lane.detected, right_lane.detected = True, True
-    # print radius of curvature
     rad_of_curvature()
 
     return output
@@ -238,7 +231,6 @@ def find_edges(img, s_thresh=s_thresh):
     # output mask
     combined_binary = np.zeros_like(s_channel).astype(np.uint8)
     combined_binary[(((sxbinary == 1) & (dir_binary == 1)) | ((s_binary == 1) & (dir_binary == 1)))] = 255
-    # add more weights for the s channel
 
     return combined_binary
 
@@ -268,53 +260,137 @@ def draw_lane(img, lane_color=(255, 0, 255), road_color=(0, 255, 0)):
     pts = np.hstack((pts_left, pts_right))
 
     cv2.fillPoly(window_img, np.int_([pts]), road_color)
-    print(type(window_img[0][0][0]))
 
     result = cv2.addWeighted(img, 1, window_img, 0.7, 0)
     return result, window_img
 
 
 def process_img(img, visualization=False):
+    # Calibration
     img_undist = cv2.undistort(img, mtx, dist, None, mtx)
-
     img_undist = cv2.resize(img_undist, (0, 0), fx=1/2, fy=1/2, interpolation=cv2.INTER_AREA)
+
     img_binary = find_edges(img_undist)
 
-    cv2.circle(img, (x[0], y[0]), 10, (255, 0, 0), -1)
-    cv2.circle(img, (x[1], y[1]), 10, (0, 255, 0), -1)
-    cv2.circle(img, (x[2], y[2]), 10, (0, 0, 255), -1)
-    cv2.circle(img, (x[3], y[3]), 10, (255, 255, 0), -1)
-
+    warped_ori = warper(img_undist)
     warped = warper(img_binary)
-
     output = find_lines(warped)
 
-    # cv2.imshow('output', output)
+    if visualization is True:
+        cv2.circle(output, (x[0], y[0]), 10, (255, 0, 0), -1)
+        cv2.circle(output, (x[1], y[1]), 10, (0, 255, 0), -1)
+        cv2.circle(output, (x[2], y[2]), 10, (0, 0, 255), -1)
+        cv2.circle(output, (x[3], y[3]), 10, (255, 255, 0), -1)
 
-    return output, img_undist
+        cv2.imshow('output', output)
+
+    return output, img_undist, warped_ori, warped
+
+
+def create_info_image(img_binary, img_window, img_result, img_warped, img_warped_ori):
+    img = np.zeros((720, 1280, 3), dtype=np.uint8)
+    img_binary = cv2.resize(img_binary, (0, 0), fx=0.75, fy=0.75, interpolation=cv2.INTER_AREA)
+    img_window = cv2.resize(img_window, (0, 0), fx=0.75, fy=0.75, interpolation=cv2.INTER_AREA)
+    img_result = cv2.resize(img_result, (0, 0), fx=0.75, fy=0.75, interpolation=cv2.INTER_AREA)
+    img_warped = cv2.resize(img_warped, (0, 0), fx=0.75, fy=0.75, interpolation=cv2.INTER_AREA)
+    img_warped_ori = cv2.resize(img_warped_ori, (0, 0), fx=0.75, fy=0.75, interpolation=cv2.INTER_AREA)
+    w = img_binary.shape[1]
+    h = img_binary.shape[0]
+
+    img[40:40+h, 20:20+w, :] = img_binary
+    img[40:40+h, 20*2+w:20*2+w*2, :] = img_result
+    img[40+h+70:40+h*2+70, 20:20 + w, :] = img_warped
+    img[40 + h + 80:40 + h * 2 + 80, 30 + w:30 + w*2, :] = img_window
+    # img[40:40 + h, 20:20 + w, :] = binary_img
+
+    font = cv2.FONT_HERSHEY_SIMPLEX
+
+    origin = "Origin"
+    DL = "Detect Lane"
+    BV = "Bird View"
+    SL = "Sliding Window"
+
+    origin_size = cv2.getTextSize(origin, font, 1, 2)[0]
+    DL_size = cv2.getTextSize(DL, font, 1, 2)[0]
+    BV_size = cv2.getTextSize(BV, font, 1, 2)[0]
+    SL_size = cv2.getTextSize(SL, font, 1, 2)[0]
+
+    cv2.putText(img, origin, ((w - origin_size[0]) // 2, 20 + h + 60),font , 1, (255 , 255, 255), 1, cv2.LINE_AA)
+    cv2.putText(img, DL, (20*2+w+(w - DL_size[0]) // 2, 20 + h + 60), font, 1, (255, 255, 255), 1, cv2.LINE_AA)
+    cv2.putText(img, BV, ((w - BV_size[0]) // 2, 20 + h*2 + 140), font, 1, (255, 255, 255), 1, cv2.LINE_AA)
+    cv2.putText(img, SL, (20*2+w+(w - SL_size[0]) // 2, 20 + h*2 + 140), font, 1, (255, 255, 255), 1, cv2.LINE_AA)
+
+    curvature = (left_lane.radius_of_curvature + right_lane.radius_of_curvature) / 2
+    direction = ((left_lane.end_x - left_lane.start_x) + (right_lane.end_x - right_lane.start_x)) / 2
+
+    if curvature > 4500 and abs(direction) < 100:
+        curve_info = 'No Curve'
+    elif curvature <= 4500 and direction < - 40:
+        curve_info = 'Left Curve'
+    elif curvature <= 4500 and direction > 40:
+        curve_info = 'Right Curve'
+    else:
+        if left_lane.curve_info != None:
+            curve_info = left_lane.curve_info
+        else:
+            curve_info = 'None'
+
+    cv2.putText(img, curve_info, (20*2+w+20, 80), font, 1, (255, 255, 255), 1, cv2.LINE_AA)
+    # cv2.putText(img, str(int(curvature)), (105 + w * 2, 80), font, 1, (255, 255, 255), 1, cv2.LINE_AA)
+    # cv2.putText(img, str(int(direction)), (105 + w * 2, 120), font, 1, (255, 255, 255), 1, cv2.LINE_AA)
+
+    return img, curve_info
+
 
 if __name__ == '__main__':
-    img = cv2.imread('../test_images/test1.jpg')
-    img, img_undist = process_img(img)
+    type = 1  # 0:image 1:video
+    if type == 0:
+        img = cv2.imread('../test_images/test1.jpg')
+        img, img_undist, _, _ = process_img(img)
 
-    result_comb, result_color = draw_lane(img)
-    rows, cols = result_comb.shape[:2]
+        result_comb, result_color = draw_lane(img)
+        rows, cols = result_comb.shape[:2]
 
-    result_color = cv2.warpPerspective(result_color, M_inv, (result_comb.shape[1], result_comb.shape[0]), flags=cv2.INTER_NEAREST)
-    comb_result = np.zeros_like(img_undist)
+        result_color = cv2.warpPerspective(result_color, M_inv, (result_comb.shape[1], result_comb.shape[0]), flags=cv2.INTER_NEAREST)
+        comb_result = np.zeros_like(img_undist)
 
-    comb_result[220:rows - 12, 0:cols] = result_color[220:rows - 12, 0:cols]
-    # print(comb_result.shape, result_color.shape)
-    # comb_result = np.asarray(comb_result, np.uint8)
+        comb_result[220:rows - 12, 0:cols] = result_color[220:rows - 12, 0:cols]
 
+        result = cv2.addWeighted(img_undist, 1, result_color, 0.3, 0)
 
-    result = cv2.addWeighted(img_undist, 0.7, result_color, 0.3, 0)
-    # print(type(img_undist[0][0][0]), type(result_color[0][0][0]))
+        cv2.imshow('result', result)
+        cv2.waitKey(0)
 
-    cv2.imshow('result', result)
+    else:
+        video = ""
+        cap = cv2.VideoCapture('../project_video.mp4')
+        while(cap.isOpened()):
+            _, frame = cap.read()
 
-    cv2.waitKey(0)
+            img_window, img_undist, img_warped, img_warped_ori = process_img(frame)
 
+            result_comb, result_color = draw_lane(img_window)
+            rows, cols = result_comb.shape[:2]
 
+            result_color = cv2.warpPerspective(result_color, M_inv, (result_comb.shape[1], result_comb.shape[0]),
+                                               flags=cv2.INTER_NEAREST)
+            comb_result = np.zeros_like(img_undist)
+            comb_result[220:rows - 12, 0:cols] = result_color[220:rows - 12, 0:cols]
 
+            result = cv2.addWeighted(img_undist, 1, result_color, 0.3, 0)
 
+            img_info, curve_info = create_info_image(img_undist, img_window, result, img_warped, img_warped_ori)
+            cv2.imshow('result', img_info)
+
+            # if left_lane.curve_info != curve_info:
+            #     cv2.waitKey(0)
+
+            left_lane.curve_info = curve_info
+
+            if cv2.waitKey(1) & 0xFF == ord('s'):
+                cv2.waitKey(0)
+            if cv2.waitKey(1) & 0xFF == ord('q'):
+                break
+
+        cap.release()
+        cv2.destroyAllWindows()
