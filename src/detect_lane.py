@@ -26,7 +26,7 @@ mtx, dist = load_calibration(cali_file)
 
 s_thresh, sx_thresh, dir_thresh, m_thresh, r_thresh = (120, 255), (20, 100), (0.7, 1.3), (30, 100), (200, 255)
 
-x = [260, 1130, 730, 590]
+x = [200, 1100, 700, 580]
 y = [719, 719, 461, 461]
 x_2 = [260, 990, 990, 260]
 y_2 = [719, 719, 0, 0]
@@ -117,6 +117,8 @@ def find_lines(img):
     histogram = np.sum(img[int(img.shape[0] / 2):, :], axis=0)
     output = np.dstack((img, img, img)) * 255
 
+    histogram = histogram / 255
+
     mid = int(histogram.shape[0]/2)
 
     start_left_x = np.argmax(histogram[:mid])
@@ -187,12 +189,20 @@ def find_lines(img):
     left_lane.prev_x.append(left_plot_x)
     right_lane.prev_x.append(right_plot_x)
 
+    # visualization Lane
+    # print(right_plot_x)
+    # print(plot_y)
+    # output[np.int_(plot_y)-2, np.int_(left_plot_x)-2] = [255, 255, 255]
+    # output[np.int_(plot_y)-10, np.int_(right_plot_x)-10] = [255, 255, 255]
+    # cv2.imshow("asd", output)
+
     if len(left_lane.prev_x) > 10:
         left_avg_line = smoothing(left_lane.prev_x, 10)
         left_avg_fit = np.polyfit(plot_y, left_avg_line, 2)
         left_fit_plot_x = left_avg_fit[0] * plot_y ** 2 + left_avg_fit[1] * plot_y + left_avg_fit[2]
         left_lane.current_fit = left_avg_fit
         left_lane.all_x, left_lane.all_y = left_fit_plot_x, plot_y
+
     else:
         left_lane.current_fit = left_fit
         left_lane.all_x, left_lane.all_y = left_plot_x, plot_y
@@ -231,8 +241,7 @@ def find_edges(img, s_thresh=s_thresh):
     # output mask
     combined_binary = np.zeros_like(s_channel).astype(np.uint8)
     combined_binary[(((sxbinary == 1) & (dir_binary == 1)) | ((s_binary == 1) & (dir_binary == 1)))] = 255
-
-    return combined_binary
+    return combined_binary, s_binary,
 
 def warper(img):
     warped = cv2.warpPerspective(img, M, (img.shape[1], img.shape[0]), flags=cv2.INTER_NEAREST)
@@ -267,22 +276,29 @@ def draw_lane(img, lane_color=(255, 0, 255), road_color=(0, 255, 0)):
 
 def process_img(img, visualization=False):
     # Calibration
-    img_undist = cv2.undistort(img, mtx, dist, None, mtx)
-    img_undist = cv2.resize(img_undist, (0, 0), fx=1/2, fy=1/2, interpolation=cv2.INTER_AREA)
+    img_undist_ori = cv2.undistort(img, mtx, dist, None, mtx)
+    img_undist = cv2.resize(img_undist_ori, (0, 0), fx=1/2, fy=1/2, interpolation=cv2.INTER_AREA)
 
-    img_binary = find_edges(img_undist)
+    img_binary, _ = find_edges(img_undist)
 
     warped_ori = warper(img_undist)
     warped = warper(img_binary)
+
     output = find_lines(warped)
 
     if visualization is True:
-        cv2.circle(output, (x[0], y[0]), 10, (255, 0, 0), -1)
-        cv2.circle(output, (x[1], y[1]), 10, (0, 255, 0), -1)
-        cv2.circle(output, (x[2], y[2]), 10, (0, 0, 255), -1)
-        cv2.circle(output, (x[3], y[3]), 10, (255, 255, 0), -1)
+        cv2.circle(img_undist_ori, (x[0], y[0]), 10, (255, 0, 0), -1)
+        cv2.circle(img_undist_ori, (x[1], y[1]), 10, (0, 255, 0), -1)
+        cv2.circle(img_undist_ori, (x[2], y[2]), 10, (0, 0, 255), -1)
+        cv2.circle(img_undist_ori, (x[3], y[3]), 10, (255, 255, 0), -1)
 
-        cv2.imshow('output', output)
+        cv2.circle(img_undist_ori, (x_2[0], y_2[0]), 10, (200, 0, 0), -1)
+        cv2.circle(img_undist_ori, (x_2[1], y_2[1]), 10, (0, 200, 0), -1)
+        cv2.circle(img_undist_ori, (x_2[2], y_2[2]), 10, (0, 0, 200), -1)
+        cv2.circle(img_undist_ori, (x_2[3], y_2[3]), 10, (200, 200, 0), -1)
+
+        cv2.imshow('img_undist', img_undist_ori)
+        cv2.imshow('warped', warped_ori)
 
     return output, img_undist, warped_ori
 
@@ -345,7 +361,7 @@ def create_info_image(img_binary, img_window, img_result, img_warped):
 if __name__ == '__main__':
     type = 1  # 0:image 1:video
     if type == 0:
-        img = cv2.imread('../test_images/test1.jpg')
+        img = cv2.imread('../test_images/straight_lines1.jpg')
         img, img_undist, _ = process_img(img)
 
         result_comb, result_color = draw_lane(img)
@@ -362,34 +378,44 @@ if __name__ == '__main__':
         cv2.waitKey(0)
 
     else:
-        video = ""
-        cap = cv2.VideoCapture('../project_video.mp4')
+        video = "harder_challenge"
+        cap = cv2.VideoCapture(f'../{video}_video.mp4')
+
+        fourcc = cv2.VideoWriter_fourcc(*'DIVX')
+        out = cv2.VideoWriter(f'../{video}.avi', fourcc, 30, (1280, 720))
         while(cap.isOpened()):
-            _, frame = cap.read()
+            try:
+                _, frame = cap.read()
 
-            img_window, img_undist, img_warped = process_img(frame)
+                img_window, img_undist, img_warped = process_img(frame)
 
-            result_comb, result_color = draw_lane(img_window)
-            rows, cols = result_comb.shape[:2]
+                result_comb, result_color = draw_lane(img_window)
+                rows, cols = result_comb.shape[:2]
 
-            result_color = cv2.warpPerspective(result_color, M_inv, (result_comb.shape[1], result_comb.shape[0]),
-                                               flags=cv2.INTER_NEAREST)
-            comb_result = np.zeros_like(img_undist)
-            comb_result[220:rows - 12, 0:cols] = result_color[220:rows - 12, 0:cols]
+                result_color = cv2.warpPerspective(result_color, M_inv, (result_comb.shape[1], result_comb.shape[0]),
+                                                   flags=cv2.INTER_NEAREST)
+                comb_result = np.zeros_like(img_undist)
+                comb_result[220:rows - 12, 0:cols] = result_color[220:rows - 12, 0:cols]
 
-            result = cv2.addWeighted(img_undist, 1, result_color, 0.3, 0)
+                result = cv2.addWeighted(img_undist, 1, result_color, 0.3, 0)
+                cv2.imshow('result', result)
+                img_info, curve_info = create_info_image(img_undist, img_window, result, img_warped)
 
-            img_info, curve_info = create_info_image(img_undist, img_window, result, img_warped)
-            cv2.imshow('result', img_info)
+                # out.write(img_info)
 
-            # if left_lane.curve_info != curve_info:
-            #     cv2.waitKey(0)
+                # cv2.imshow('result', img_info)
 
-            left_lane.curve_info = curve_info
+                # if left_lane.curve_info != curve_info:
+                #     cv2.waitKey(0)
 
-            if cv2.waitKey(1) & 0xFF == ord('s'):
-                cv2.waitKey(0)
-            if cv2.waitKey(1) & 0xFF == ord('q'):
+                left_lane.curve_info = curve_info
+
+                if cv2.waitKey(1) & 0xFF == ord('s'):
+                    cv2.waitKey(0)
+                if cv2.waitKey(1) & 0xFF == ord('q'):
+                    break
+            except Exception as e:
+                print(e)
                 break
 
         cap.release()
