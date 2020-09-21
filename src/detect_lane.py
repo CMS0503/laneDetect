@@ -284,16 +284,16 @@ def process_img(img, visualization=False):
 
         cv2.imshow('output', output)
 
-    return output, img_undist, warped_ori, warped
+    return output, img_undist, warped_ori
 
 
-def create_info_image(img_binary, img_window, img_result, img_warped, img_warped_ori):
+def create_info_image(img_binary, img_window, img_result, img_warped):
     img = np.zeros((720, 1280, 3), dtype=np.uint8)
     img_binary = cv2.resize(img_binary, (0, 0), fx=0.75, fy=0.75, interpolation=cv2.INTER_AREA)
     img_window = cv2.resize(img_window, (0, 0), fx=0.75, fy=0.75, interpolation=cv2.INTER_AREA)
     img_result = cv2.resize(img_result, (0, 0), fx=0.75, fy=0.75, interpolation=cv2.INTER_AREA)
     img_warped = cv2.resize(img_warped, (0, 0), fx=0.75, fy=0.75, interpolation=cv2.INTER_AREA)
-    img_warped_ori = cv2.resize(img_warped_ori, (0, 0), fx=0.75, fy=0.75, interpolation=cv2.INTER_AREA)
+
     w = img_binary.shape[1]
     h = img_binary.shape[0]
 
@@ -315,7 +315,7 @@ def create_info_image(img_binary, img_window, img_result, img_warped, img_warped
     BV_size = cv2.getTextSize(BV, font, 1, 2)[0]
     SL_size = cv2.getTextSize(SL, font, 1, 2)[0]
 
-    cv2.putText(img, origin, ((w - origin_size[0]) // 2, 20 + h + 60),font , 1, (255 , 255, 255), 1, cv2.LINE_AA)
+    cv2.putText(img, origin, ((w - origin_size[0]) // 2, 20 + h + 60), font, 1, (255 , 255, 255), 1, cv2.LINE_AA)
     cv2.putText(img, DL, (20*2+w+(w - DL_size[0]) // 2, 20 + h + 60), font, 1, (255, 255, 255), 1, cv2.LINE_AA)
     cv2.putText(img, BV, ((w - BV_size[0]) // 2, 20 + h*2 + 140), font, 1, (255, 255, 255), 1, cv2.LINE_AA)
     cv2.putText(img, SL, (20*2+w+(w - SL_size[0]) // 2, 20 + h*2 + 140), font, 1, (255, 255, 255), 1, cv2.LINE_AA)
@@ -346,7 +346,7 @@ if __name__ == '__main__':
     type = 1  # 0:image 1:video
     if type == 0:
         img = cv2.imread('../test_images/test1.jpg')
-        img, img_undist, _, _ = process_img(img)
+        img, img_undist, _ = process_img(img)
 
         result_comb, result_color = draw_lane(img)
         rows, cols = result_comb.shape[:2]
@@ -367,7 +367,7 @@ if __name__ == '__main__':
         while(cap.isOpened()):
             _, frame = cap.read()
 
-            img_window, img_undist, img_warped, img_warped_ori = process_img(frame)
+            img_window, img_undist, img_warped = process_img(frame)
 
             result_comb, result_color = draw_lane(img_window)
             rows, cols = result_comb.shape[:2]
@@ -379,7 +379,8 @@ if __name__ == '__main__':
 
             result = cv2.addWeighted(img_undist, 1, result_color, 0.3, 0)
 
-            img_info, curve_info = create_info_image(img_undist, img_window, result, img_warped, img_warped_ori)
+            img_info, curve_info = create_info_image(img_undist, img_window, result, img_warped)
+            cv2.imshow('aa', img_warped_ori)
             cv2.imshow('result', img_info)
 
             # if left_lane.curve_info != curve_info:
