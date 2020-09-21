@@ -380,7 +380,6 @@ if __name__ == '__main__':
             result = cv2.addWeighted(img_undist, 1, result_color, 0.3, 0)
 
             img_info, curve_info = create_info_image(img_undist, img_window, result, img_warped)
-            cv2.imshow('aa', img_warped_ori)
             cv2.imshow('result', img_info)
 
             # if left_lane.curve_info != curve_info:
